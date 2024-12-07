@@ -19,6 +19,7 @@ class Blockchain(object):
         block_encoded = json.dumps(block, sort_keys=True).encode()
         return hashlib.sha256(block_encoded).hexdigest()
     def __init__(self):
+        self.nodes = set()          # === Decentralize : Syncronize Multiple Nodes ===
         self.chain = []
         self.current_transaction = []
         genesis_hash = self.hash_block("genesis_block")
@@ -26,6 +27,51 @@ class Blockchain(object):
             hash_of_previous_block = genesis_hash,
             nonce = self.proof_of_work(0, genesis_hash, [])
         )
+
+# === Decentralize : Syncronize Multiple Nodes ===
+    def add_node(self, address):
+        parse_url = urlparse(address)
+        self.nodes.add(parse_url.netloc)
+        print(parse_url.netloc)
+
+    def valid_chain(self, chain):
+        last_block = chain[0]
+        current_index = 1
+        while current_index < len(chain):
+            block = chain[current_index]
+            if block['hash_of_previous_block'] != self.hash_block(last_block):
+                return False
+            if not self.valid_proof(
+                current_index,
+                block['hash_of_previous_block'],
+                block['transaction'],
+                block['nonce']):
+                return False
+            
+            last_block = block
+            current_index += 1
+
+        return True
+    
+    def update_blockchain(self):
+        neighbours = self.nodes
+        new_chain = None
+
+        max_range = len(self.chain)
+
+        for node in neighbours:
+            response = requests.get(f'http://{node}/blockchain')
+            if response.status_code == 200:
+                length = response.json()['length']
+                chain = response.json()['chain']
+                if length > max_range and self.valid_chain(chain):
+                    max_range = length
+                    new_chain = chain
+                    if new_chain:
+                        self.chain = new_chain
+                        return True
+        return False
+# === Decentralize : Syncronize Multiple Nodes ===    
     
     def proof_of_work (self, index, hash_of_previous_block, transactions):
         nonce = 0
@@ -117,6 +163,41 @@ def new_transaction():
 
     response = {'message': f'Transaction will be added to block {index}'}
     return (jsonify(response), 201)
+
+# === Decentralize : Syncronize Multiple Nodes ===    
+@app.route('/nodes/add_nodes', methods=['POST'])
+def add_nodes():
+    values = request.get_json()
+    nodes = values.get('nodes')
+
+    if nodes is None:
+        return "Error, Missing Nodes Info", 400
+
+    for node in nodes:
+        blockchain.add_node(node)
+        response = {
+            'message' : 'The New Node Has Been Successfully Added',
+            'nodes' : list(blockchain.nodes)
+        }
+    
+    return jsonify(response), 200
+
+@app.route('/nodes/sync', methods=['GET'])
+def sync():
+    update = blockchain.update_blockchain
+    if update:
+        response = {
+            'message' : 'The New Node Has Successfully Synchronized',
+            'nodes' : list(blockchain.nodes)
+        }
+    else:
+        response = {
+            'message' : 'The New Node Has Used The Latest Data',
+            'nodes' : list(blockchain.nodes)
+        }
+    
+    return jsonify(response), 200
+# === Decentralize : Syncronize Multiple Nodes ===    
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=int(sys.argv[1]))
